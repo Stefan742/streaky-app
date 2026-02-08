@@ -1,0 +1,81 @@
+{
+  "expo": {
+    "name": "streakyApp",
+    "slug": "streakyApp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icons/app_icon.png",
+    "scheme": "streakyapp",
+    "splash": {
+      "image": "./assets/icons/splash_icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#40b8a5"
+    },
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "infoPlist": {
+        "UINotificationIcon": "app_icon",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.stefan.streaky",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/app_icon.png",
+        "backgroundColor": "#E6F4FE"
+      },
+      "package": "com.stefan.streaky",
+      "googleServicesFile": "./google-services.json",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/icons/app_icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icons/splash_icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#E6F4FE",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
+        }
+      ],
+      "expo-audio",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icons/notification_icon.png",
+          "color": "#40b8a5",
+          "sounds": [
+            "./assets/sounds/task_finished.mp3"
+          ]
+        }
+      ]
+    ],
+    "notification": {
+      "icon": "./assets/icons/notification_icon.png",
+      "color": "#40b8a5",
+      "androidMode": "default"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2c61c996-3bf4-47b1-a918-6e2f3afaef6d"
+      }
+    }
+  }
+}

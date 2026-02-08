@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "158177558372",
+    "project_id": "streaky-app-1afc4",
+    "storage_bucket": "streaky-app-1afc4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:158177558372:android:d2e172b4199a1f31578471",
+        "android_client_info": {
+          "package_name": "com.stefan.streaky"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD_tkXL8-vquPMhM2nYrT4AlEZL74X6BV0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
