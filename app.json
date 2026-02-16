@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "streakyApp",
+    "name": "Streaky - Daily Habit Tracker",
     "slug": "streakyApp",
-    "version": "1.0.0",
+    "version": "1.0.1", // 🔥 Зголемена верзија
     "orientation": "portrait",
     "icon": "./assets/icons/app_icon.png",
     "scheme": "streakyapp",
@@ -13,6 +13,8 @@
     },
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "description": "Track your daily habits, maintain streaks, and achieve your goals with Streaky - your personal habit tracking companion.", // 🔥 За Play Store
+    "privacy": "public", // 🔥 За да може да се најде на Play Store
     "ios": {
       "infoPlist": {
         "UINotificationIcon": "app_icon",
@@ -20,21 +22,23 @@
       },
       "bundleIdentifier": "com.stefan.streaky",
       "googleServicesFile": "./GoogleService-Info.plist",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "buildNumber": "2" // 🔥 iOS build number
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icons/app_icon.png",
-        "backgroundColor": "#E6F4FE"
+        "backgroundColor": "#40b8a5" // 🔥 Променето да се совпаѓа со splash
       },
       "package": "com.stefan.streaky",
+      "versionCode": 2, // 🔥 КРИТИЧНО - зголемен за нова верзија
       "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
-        "amdoid.permission.notifications"
+        "android.permission.POST_NOTIFICATIONS" // 🔥 Исправено (беше погрешно напишано)
       ]
     },
     "web": {
@@ -49,9 +53,9 @@
           "image": "./assets/icons/app_icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#E6F4FE",
+          "backgroundColor": "#40b8a5", // 🔥 Променето да се совпаѓа
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#1a1a1a" // 🔥 Подобра темна боја
           }
         }
       ],
