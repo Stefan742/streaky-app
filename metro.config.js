@@ -1,13 +1,18 @@
+// metro.config.js
 const { getDefaultConfig } = require('@expo/metro-config');
 
-module.exports = (() => {
-  const config = getDefaultConfig(__dirname);
+const config = getDefaultConfig(__dirname);
 
-  config.transformer = {
-    babelTransformerPath: require.resolve('react-native-svg-transformer'),
-  };
-  config.resolver.assetExts = config.resolver.assetExts.filter(ext => ext !== 'svg');
-  config.resolver.sourceExts.push('svg');
+// 🔥 ИСПРАВЕНО: extend постоечката конфигурација
+config.transformer = {
+  ...config.transformer, // 🔥 Зачувај ги постоечките трансформери
+  babelTransformerPath: require.resolve('react-native-svg-transformer'),
+};
 
-  return config;
-})();
+config.resolver = {
+  ...config.resolver, // 🔥 Зачувај ги постоечките resolver опции
+  assetExts: config.resolver.assetExts.filter(ext => ext !== 'svg'),
+  sourceExts: [...config.resolver.sourceExts, 'svg'], // 🔥 Додај svg
+};
+
+module.exports = config;
