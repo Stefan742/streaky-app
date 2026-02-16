@@ -14,6 +14,7 @@ export async function syncActivityToFirebase(): Promise<void> {
     async () => {
       const { currentUser, isGuest } = useAuthStore.getState();
       if (isGuest || !currentUser) {
+        console.log('⚠️ User not logged in, skipping activity sync');
         return;
       }
 
@@ -33,7 +34,10 @@ export async function syncActivityToFirebase(): Promise<void> {
 
         await setDoc(activityRef, data, { merge: true });
 
-        console.log('✅ Activity synced to Firebase');
+        console.log('✅ Activity synced to Firebase:', {
+          days: activeDays.length,
+          lastActive: lastActiveDate,
+        });
       } catch (error: any) {
         if (error.code === 'unavailable') {
           console.log('⚠️ Offline - activity sync will retry');
@@ -48,12 +52,13 @@ export async function syncActivityToFirebase(): Promise<void> {
 }
 
 /**
- * Sync activity FROM Firestore
- * Merge strategy: Union of active days (users can't lose activity)
+ * 🔥 ИСПРАВЕНО: Sync activity FROM Firestore
+ * FIREBASE WINS - земај ги Firebase податоците директно
  */
 export async function syncActivityFromFirebase(): Promise<void> {
   const { currentUser, isGuest } = useAuthStore.getState();
   if (isGuest || !currentUser) {
+    console.log('⚠️ User not logged in, skipping activity sync');
     return;
   }
 
@@ -62,37 +67,27 @@ export async function syncActivityFromFirebase(): Promise<void> {
     const activityDoc = await getDoc(activityRef);
 
     if (!activityDoc.exists()) {
-      console.log('No activity data on server - pushing local data');
+      console.log('⚠️ No activity data on server - will upload local data on next activity');
       await syncActivityToFirebase();
       return;
     }
 
     const firebaseData = activityDoc.data() as ActivityData;
 
-    // Get local active days
-    const localActiveDaysStr = await AsyncStorage.getItem('activeDays');
-    const localActiveDays: string[] = localActiveDaysStr ? JSON.parse(localActiveDaysStr) : [];
+    // 🔥 FIREBASE WINS: Зачувај ги Firebase податоците локално
+    await AsyncStorage.setItem(
+      'activeDays',
+      JSON.stringify(firebaseData.activeDays || [])
+    );
+    await AsyncStorage.setItem(
+      'lastActiveDate',
+      firebaseData.lastActiveDate || ''
+    );
 
-    // Merge: Union of both sets (sorted)
-    const mergedActiveDays = Array.from(
-      new Set([...localActiveDays, ...firebaseData.activeDays])
-    ).sort();
-
-    // Use most recent lastActiveDate
-    const localLastActive = await AsyncStorage.getItem('lastActiveDate');
-    const lastActiveDate =
-      localLastActive && localLastActive > firebaseData.lastActiveDate
-        ? localLastActive
-        : firebaseData.lastActiveDate;
-
-    // Save merged data locally
-    await AsyncStorage.setItem('activeDays', JSON.stringify(mergedActiveDays));
-    await AsyncStorage.setItem('lastActiveDate', lastActiveDate);
-
-    console.log('✅ Activity synced from Firebase (merged)');
-
-    // Push merged data back to Firebase
-    await syncActivityToFirebase();
+    console.log('✅ Activity loaded from Firebase:', {
+      days: firebaseData.activeDays?.length || 0,
+      lastActive: firebaseData.lastActiveDate,
+    });
   } catch (error: any) {
     if (error.code === 'unavailable') {
       console.log('⚠️ Offline - will sync activity when online');

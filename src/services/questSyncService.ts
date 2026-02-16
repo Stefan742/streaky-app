@@ -14,6 +14,7 @@ export async function syncQuestsToFirebase(): Promise<void> {
     async () => {
       const { currentUser, isGuest } = useAuthStore.getState();
       if (isGuest || !currentUser) {
+        console.log('⚠️ User not logged in, skipping quest sync');
         return;
       }
 
@@ -32,7 +33,10 @@ export async function syncQuestsToFirebase(): Promise<void> {
 
         await setDoc(questRef, data, { merge: true });
 
-        console.log('✅ Quests synced to Firebase');
+        console.log('✅ Quests synced to Firebase:', {
+          total: questState.totalCompletedQuests,
+          today: questState.todayCompletedCount,
+        });
       } catch (error: any) {
         if (error.code === 'unavailable') {
           console.log('⚠️ Offline - quest sync will retry');
@@ -47,12 +51,13 @@ export async function syncQuestsToFirebase(): Promise<void> {
 }
 
 /**
- * Sync quests FROM Firestore
- * Conflict resolution: Use totalCompletedQuests to determine authoritative source
+ * 🔥 ИСПРАВЕНО: Sync quests FROM Firestore
+ * FIREBASE WINS - земај ги Firebase податоците директно
  */
 export async function syncQuestsFromFirebase(): Promise<void> {
   const { currentUser, isGuest } = useAuthStore.getState();
   if (isGuest || !currentUser) {
+    console.log('⚠️ User not logged in, skipping quest sync');
     return;
   }
 
@@ -61,31 +66,26 @@ export async function syncQuestsFromFirebase(): Promise<void> {
     const questDoc = await getDoc(questRef);
 
     if (!questDoc.exists()) {
-      console.log('No quest data on server - pushing local data');
+      console.log('⚠️ No quest data on server - will upload local data on next change');
       await syncQuestsToFirebase();
       return;
     }
 
     const firebaseData = questDoc.data() as QuestData;
-    const localData = useQuestStore.getState();
 
-    // Conflict resolution: Take higher totalCompletedQuests
-    // Users cannot lose completed quests
-    if (firebaseData.totalCompletedQuests > localData.totalCompletedQuests) {
-      useQuestStore.setState({
-        quests: firebaseData.quests,
-        totalCompletedQuests: firebaseData.totalCompletedQuests,
-        todayCompletedCount: firebaseData.todayCompletedCount,
-        lastResetDate: firebaseData.lastResetDate,
-      });
+    // 🔥 FIREBASE WINS: Земи ги Firebase податоците директно
+    useQuestStore.setState({
+      quests: firebaseData.quests || [],
+      totalCompletedQuests: firebaseData.totalCompletedQuests || 0,
+      todayCompletedCount: firebaseData.todayCompletedCount || 0,
+      lastResetDate: firebaseData.lastResetDate || new Date().toISOString().split('T')[0],
+    });
 
-      console.log('✅ Quests synced from Firebase (server had more completions)');
-    } else if (localData.totalCompletedQuests > firebaseData.totalCompletedQuests) {
-      console.log('⚠️ Local quests ahead of server - pushing to Firebase');
-      await syncQuestsToFirebase();
-    } else {
-      console.log('✅ Quests are in sync');
-    }
+    console.log('✅ Quests loaded from Firebase:', {
+      total: firebaseData.totalCompletedQuests,
+      today: firebaseData.todayCompletedCount,
+      activeQuests: firebaseData.quests.length,
+    });
   } catch (error: any) {
     if (error.code === 'unavailable') {
       console.log('⚠️ Offline - will sync quests when online');

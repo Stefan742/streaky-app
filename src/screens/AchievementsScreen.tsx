@@ -4,8 +4,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import MedalUnlockAnimation from '../components/MedalUnlockAnimation';
-import { useMedalStore } from '../store/MedalStore';
-
+import { Medal, useMedalStore } from '../store/MedalStore';
 
 // Medal SVG imports
 import Medal100Task from '../../assets/medals/medal_100taskFinished.svg';
@@ -34,37 +33,45 @@ export default function AchievementsScreen() {
   const medals = useMedalStore((state) => state.medals);
   const getUnviewedMedals = useMedalStore((state) => state.getUnviewedMedals);
   const markMedalAsViewed = useMedalStore((state) => state.markMedalAsViewed);
-  const markAllAsViewed = useMedalStore((state) => state.markAllAsViewed);
 
   const [showingUnlock, setShowingUnlock] = useState(false);
   const [currentUnlockIndex, setCurrentUnlockIndex] = useState(0);
-  const [unviewedMedals, setUnviewedMedals] = useState<any[]>([]);
+  const [unviewedMedals, setUnviewedMedals] = useState<Medal[]>([]); // 🔥 Променето од any[] на Medal[]
 
   const totalUnlocked = medals.filter((m) => m.unlocked).length;
 
-
-
   useEffect(() => {
-    // Check for unviewed medals on mount
+    // 🔥 Провери за unseen medals кога се отвора screen-от
+    console.log('📱 AchievementsScreen opened');
     const unviewed = getUnviewedMedals();
+    console.log('🎖️ Unviewed medals found:', unviewed.length, unviewed.map(m => m.title));
+    
     if (unviewed.length > 0) {
       setUnviewedMedals(unviewed);
       setShowingUnlock(true);
       setCurrentUnlockIndex(0);
+    } else {
+      setShowingUnlock(false);
     }
   }, []);
 
   const handleUnlockComplete = () => {
+    const currentMedal = unviewedMedals[currentUnlockIndex];
+    console.log('✅ Marking medal as viewed:', currentMedal.title);
+    
     // Mark current medal as viewed
-    markMedalAsViewed(unviewedMedals[currentUnlockIndex].id);
+    markMedalAsViewed(currentMedal.id);
 
     // Check if there are more unviewed medals
     if (currentUnlockIndex < unviewedMedals.length - 1) {
+      console.log('📋 Showing next medal:', currentUnlockIndex + 1);
       setCurrentUnlockIndex(currentUnlockIndex + 1);
     } else {
       // All done
+      console.log('✅ All medals viewed!');
       setShowingUnlock(false);
-      markAllAsViewed();
+      setUnviewedMedals([]);
+      setCurrentUnlockIndex(0);
     }
   };
 
@@ -97,7 +104,6 @@ export default function AchievementsScreen() {
                     style={[styles.iconWrapper, !item.unlocked && styles.iconWrapperLocked]}
                   >
                     <MedalIcon width={200} height={200} />
-                    {!item.unlocked}
                   </View>
                   <Text
                     style={[styles.medalTitle, !item.unlocked && styles.medalTitleLocked]}
@@ -111,12 +117,12 @@ export default function AchievementsScreen() {
         </View>
       </View>
 
-      {/* Unlock animation overlay */}
-      {showingUnlock && unviewedMedals[currentUnlockIndex] && (
+      {/* 🔥 Unlock animation overlay - ИСПРАВЕНО */}
+      {showingUnlock && unviewedMedals.length > 0 && unviewedMedals[currentUnlockIndex] && (
         <MedalUnlockAnimation
-          medalId={unviewedMedals[currentUnlockIndex].id}
-          medalTitle={unviewedMedals[currentUnlockIndex].title}
-          onComplete={handleUnlockComplete}
+          visible={true}
+          medal={unviewedMedals[currentUnlockIndex]}
+          onClose={handleUnlockComplete}
         />
       )}
     </SafeAreaView>
@@ -219,10 +225,9 @@ const styles = StyleSheet.create({
   },
 
   iconWrapperLocked: {
-    filter: [{ blur: 2.5 }],
+    // Locked styling
   },
 
-  
   medalTitleLocked: {
     color: '#45474c',
   },

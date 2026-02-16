@@ -4,7 +4,7 @@ import { Asset } from 'expo-asset';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Configure notification behavior (FIXED: removed deprecated shouldShowAlert)
+// Configure notification behavior
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -14,17 +14,17 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Notification identifiers (prevent duplicates)
+// Notification identifiers
 const NOTIFICATION_IDS = {
-  DAILY_REMINDER: 'daily-reminder',
+  MORNING_REMINDER: 'morning-reminder',
+  AFTERNOON_REMINDER: 'afternoon-reminder',
+  EVENING_REMINDER: 'evening-reminder',
   STREAK_WARNING: 'streak-warning',
 };
 
 // Storage keys
 const STORAGE_KEYS = {
-  LAST_DAILY_REMINDER: 'last-daily-reminder-date',
   LAST_STREAK_WARNING: 'last-streak-warning-date',
-  DAILY_REMINDER_HOUR: 'daily-reminder-hour',
   NOTIFICATIONS_ENABLED: 'notifications-enabled',
 };
 
@@ -48,7 +48,6 @@ async function getLargeIconUri(): Promise<string | null> {
 
 /**
  * Request notification permissions
- * Call this on app startup or when user opts in
  */
 export async function requestNotificationPermissions(): Promise<boolean> {
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -95,73 +94,130 @@ function getTodayString(): string {
 }
 
 /**
- * Schedule daily reminder notification
- * @param hour - Hour of day (0-23) to send notification
- * Default: 9 AM
+ * 🆕 Schedule multiple daily reminders throughout the day
+ * Morning (9 AM), Afternoon (2 PM), Evening (7 PM)
  */
-export async function scheduleDailyReminder(hour: number = 9): Promise<void> {
+export async function scheduleDailyReminders(): Promise<void> {
   const enabled = await areNotificationsEnabled();
   if (!enabled) return;
 
-  // Cancel existing daily reminder
-  await cancelDailyReminder();
+  // Cancel existing reminders
+  await cancelDailyReminders();
 
-  // Don't send more than once per day
-  const lastSent = await AsyncStorage.getItem(STORAGE_KEYS.LAST_DAILY_REMINDER);
-  const today = getTodayString();
-  
-  if (lastSent === today) {
-    console.log('Daily reminder already sent today');
+  const largeIcon = await getLargeIconUri();
+
+  const reminders = [
+    {
+      id: NOTIFICATION_IDS.MORNING_REMINDER,
+      hour: 9,
+      minute: 0,
+      title: "☀️ Good Morning!",
+      body: "Start your day strong! Complete your morning quests.",
+    },
+    {
+      id: NOTIFICATION_IDS.AFTERNOON_REMINDER,
+      hour: 14,
+      minute: 0,
+      title: "🔥 Afternoon Check-In",
+      body: "How's your day going? Don't forget to complete your quests!",
+    },
+    {
+      id: NOTIFICATION_IDS.EVENING_REMINDER,
+      hour: 19,
+      minute: 0,
+      title: "🌙 Evening Reminder",
+      body: "Your streak is counting on you! Complete at least one quest today.",
+    },
+  ];
+
+  for (const reminder of reminders) {
+    await Notifications.scheduleNotificationAsync({
+      identifier: reminder.id,
+      content: {
+        title: reminder.title,
+        body: reminder.body,
+        data: { type: 'daily-reminder' },
+        sound: true,
+        ...(Platform.OS === 'android' && {
+          android: {
+            ...(largeIcon && { largeIcon }),
+            color: '#40b8a5',
+            channelId: 'default',
+          },
+        }),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour: reminder.hour,
+        minute: reminder.minute,
+        repeats: true,
+      } as Notifications.DailyTriggerInput,
+    });
+
+    console.log(`Reminder scheduled for ${reminder.hour}:${reminder.minute.toString().padStart(2, '0')}`);
+  }
+}
+
+/**
+ * Cancel all daily reminders
+ */
+export async function cancelDailyReminders(): Promise<void> {
+  await Notifications.cancelScheduledNotificationAsync(NOTIFICATION_IDS.MORNING_REMINDER);
+  await Notifications.cancelScheduledNotificationAsync(NOTIFICATION_IDS.AFTERNOON_REMINDER);
+  await Notifications.cancelScheduledNotificationAsync(NOTIFICATION_IDS.EVENING_REMINDER);
+  console.log('Daily reminders cancelled');
+}
+
+/**
+ * 🆕 SMART REMINDER: Проверува дали има завршени quests
+ * Ако нема → испраќа reminder
+ * Повикај ја секој час преку background task (опционо)
+ */
+export async function checkAndSendSmartReminder(
+  todayCompletedCount: number
+): Promise<void> {
+  const enabled = await areNotificationsEnabled();
+  if (!enabled) return;
+
+  // Ако има завршени quests → не праќај reminder
+  if (todayCompletedCount > 0) {
+    console.log('User has completed quests today, no reminder needed');
     return;
   }
 
-  // Get large icon
+  const hour = new Date().getHours();
+
+  // Праќај само во работно време (9 AM - 10 PM)
+  if (hour < 10 || hour >= 22) {
+    return;
+  }
+
   const largeIcon = await getLargeIconUri();
 
-  // Schedule notification - Daily repeating at specific hour
+  // Send immediate notification
   await Notifications.scheduleNotificationAsync({
-    identifier: NOTIFICATION_IDS.DAILY_REMINDER,
     content: {
       title: "🔥 Keep Your Streak Alive!",
-      body: "Time to complete today's quests and maintain your momentum.",
-      data: { type: 'daily-reminder' },
+      body: "You haven't completed any quests today. Start now!",
+      data: { type: 'smart-reminder' },
       sound: true,
       ...(Platform.OS === 'android' && {
         android: {
-          // FIXED: Use the notification icon from app.json
-          // The small icon is set via app.json config
-          ...(largeIcon && { largeIcon }), // Large icon is the colored app icon
+          ...(largeIcon && { largeIcon }),
           color: '#40b8a5',
           channelId: 'default',
         },
       }),
     },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour,
-      minute: 0,
-      repeats: true,
-    } as Notifications.DailyTriggerInput,
+    trigger: null, // Send immediately
   });
 
-  // Save reminder hour for future reference
-  await AsyncStorage.setItem(STORAGE_KEYS.DAILY_REMINDER_HOUR, hour.toString());
-  
-  console.log(`Daily reminder scheduled for ${hour}:00`);
-}
-
-/**
- * Cancel daily reminder notification
- */
-export async function cancelDailyReminder(): Promise<void> {
-  await Notifications.cancelScheduledNotificationAsync(NOTIFICATION_IDS.DAILY_REMINDER);
-  console.log('Daily reminder cancelled');
+  console.log('Smart reminder sent');
 }
 
 /**
  * Send streak warning if user hasn't completed any quests today
  * Only sends once per day, in the evening
- * @param currentHour - Current hour (for testing, defaults to actual time)
  */
 export async function checkAndSendStreakWarning(
   todayCompletedCount: number,
@@ -185,14 +241,13 @@ export async function checkAndSendStreakWarning(
     return;
   }
 
-  // Only send in the evening (6 PM - 11 PM)
+  // Only send in the evening (8 PM - 11 PM)
   const hour = currentHour ?? new Date().getHours();
-  if (hour < 18 || hour >= 23) {
+  if (hour < 20 || hour >= 23) {
     console.log('Not the right time for streak warning');
     return;
   }
 
-  // Get large icon
   const largeIcon = await getLargeIconUri();
 
   // Send immediate notification
@@ -206,7 +261,7 @@ export async function checkAndSendStreakWarning(
       ...(Platform.OS === 'android' && {
         android: {
           ...(largeIcon && { largeIcon }),
-          color: '#40b8a5',
+          color: '#FF3B30', // Црвена за warning
           channelId: 'default',
         },
       }),
@@ -222,7 +277,6 @@ export async function checkAndSendStreakWarning(
 
 /**
  * Send a celebration notification when user completes a milestone
- * This is immediate, not scheduled
  */
 export async function sendCelebrationNotification(
   title: string,
@@ -231,7 +285,6 @@ export async function sendCelebrationNotification(
   const enabled = await areNotificationsEnabled();
   if (!enabled) return;
 
-  // Get large icon
   const largeIcon = await getLargeIconUri();
 
   await Notifications.scheduleNotificationAsync({
@@ -268,26 +321,6 @@ export async function getScheduledNotifications(): Promise<Notifications.Notific
 }
 
 /**
- * Update daily reminder time
- */
-export async function updateDailyReminderTime(hour: number): Promise<void> {
-  if (hour < 0 || hour > 23) {
-    throw new Error('Hour must be between 0 and 23');
-  }
-  
-  await scheduleDailyReminder(hour);
-  console.log(`Daily reminder updated to ${hour}:00`);
-}
-
-/**
- * Get saved daily reminder hour
- */
-export async function getDailyReminderHour(): Promise<number> {
-  const saved = await AsyncStorage.getItem(STORAGE_KEYS.DAILY_REMINDER_HOUR);
-  return saved ? parseInt(saved, 10) : 9; // Default 9 AM
-}
-
-/**
  * Disable notifications completely
  */
 export async function disableNotifications(): Promise<void> {
@@ -302,15 +335,13 @@ export async function disableNotifications(): Promise<void> {
 export async function enableNotifications(): Promise<void> {
   const hasPermission = await requestNotificationPermissions();
   if (hasPermission) {
-    const hour = await getDailyReminderHour();
-    await scheduleDailyReminder(hour);
+    await scheduleDailyReminders();
     console.log('Notifications enabled');
   }
 }
 
 /**
  * Initialize notifications on app startup
- * Call this in your root layout
  */
 export async function initializeNotifications(): Promise<void> {
   const hasPermission = await requestNotificationPermissions();
@@ -319,9 +350,8 @@ export async function initializeNotifications(): Promise<void> {
     const enabled = await areNotificationsEnabled();
     
     if (enabled) {
-      // Reschedule daily reminder if needed
-      const hour = await getDailyReminderHour();
-      await scheduleDailyReminder(hour);
+      // Schedule daily reminders
+      await scheduleDailyReminders();
       console.log('Notifications initialized');
     }
   }
@@ -329,10 +359,8 @@ export async function initializeNotifications(): Promise<void> {
 
 /**
  * TEST FUNCTION: Send immediate test notification
- * Use this to test notifications in development
  */
 export async function sendTestNotification(): Promise<void> {
-  // Get large icon
   const largeIcon = await getLargeIconUri();
 
   await Notifications.scheduleNotificationAsync({
@@ -364,7 +392,6 @@ export async function scheduleTestReminderSoon(): Promise<void> {
   const now = new Date();
   const testTime = new Date(now.getTime() + 60 * 1000); // 1 minute from now
   
-  // Get large icon
   const largeIcon = await getLargeIconUri();
   
   await Notifications.scheduleNotificationAsync({
@@ -388,3 +415,12 @@ export async function scheduleTestReminderSoon(): Promise<void> {
   
   console.log(`Test reminder scheduled for ${testTime.toLocaleTimeString()}`);
 }
+
+// 🆕 BACKWARD COMPATIBILITY
+// Стари функции за да не се скрши постоечкиот код
+export const scheduleDailyReminder = scheduleDailyReminders;
+export const cancelDailyReminder = cancelDailyReminders;
+export const getDailyReminderHour = async () => 9; // Deprecated
+export const updateDailyReminderTime = async (hour: number) => {
+  console.warn('updateDailyReminderTime is deprecated. Use scheduleDailyReminders instead.');
+};

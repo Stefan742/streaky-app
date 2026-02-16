@@ -1,7 +1,9 @@
 // src/components/MedalUnlockAnimation.tsx
 import { useAudioPlayer } from 'expo-audio';
 import React, { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, Modal, StyleSheet, Text, View } from 'react-native';
+
+import { Medal } from '../store/MedalStore';
 
 // Import all medal SVGs
 import Medal100Task from '../../assets/medals/medal_100taskFinished.svg';
@@ -17,9 +19,9 @@ import MedalSuperHappy from '../../assets/medals/medal_superHappy.svg';
 const { width, height } = Dimensions.get('window');
 
 type Props = {
-  medalId: string;
-  medalTitle: string;
-  onComplete: () => void;
+  visible: boolean;
+  medal: Medal;
+  onClose: () => void;
 };
 
 const medalIcons: { [key: string]: any } = {
@@ -34,7 +36,7 @@ const medalIcons: { [key: string]: any } = {
   '9': MedalSuperHappy,
 };
 
-export default function MedalUnlockAnimation({ medalId, medalTitle, onComplete }: Props) {
+export default function MedalUnlockAnimation({ visible, medal, onClose }: Props) {
   const scale = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -42,131 +44,164 @@ export default function MedalUnlockAnimation({ medalId, medalTitle, onComplete }
   const textOpacity = useRef(new Animated.Value(0)).current;
 
   const player = useAudioPlayer(require('../../assets/sounds/medal_achieved.mp3'));
+  const pulseLoopRef = useRef<any>(null);
 
   useEffect(() => {
-    // Play sound
-    try {
-      player.seekTo(0);
-      player.play();
-    } catch (error) {
-      console.log('Medal sound playback skipped:', error);
-    }
+    if (visible) {
+      console.log('🎖️ Medal animation starting for:', medal.title);
 
-    // 1. Fade in overlay
-    Animated.timing(opacity, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
+      // Play sound
+      try {
+        player.seekTo(0);
+        player.play();
+      } catch (error) {
+        console.log('Medal sound playback skipped:', error);
+      }
 
-    // 2. Scale in medal + pulse
-    Animated.sequence([
+      // Reset animations
+      scale.setValue(0);
+      opacity.setValue(0);
+      pulseAnim.setValue(1);
+      textSlide.setValue(50);
+      textOpacity.setValue(0);
+
+      // 1. Fade in overlay
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+
+      // 2. Scale in medal
       Animated.spring(scale, {
         toValue: 1,
         friction: 4,
         tension: 60,
         useNativeDriver: true,
-      }),
-      // Continuous pulse
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-        ])
-      ),
-    ]).start();
-
-    // 3. Slide up text
-    Animated.parallel([
-      Animated.timing(textSlide, {
-        toValue: 0,
-        duration: 600,
-        delay: 400,
-        useNativeDriver: true,
-      }),
-      Animated.timing(textOpacity, {
-        toValue: 1,
-        duration: 600,
-        delay: 400,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    // 4. Auto-dismiss after 3 seconds
-    const timer = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(opacity, {
-          toValue: 0,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 0,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        onComplete();
+      }).start(() => {
+        // 3. Start continuous pulse after medal appears
+        pulseLoopRef.current = Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseAnim, {
+              toValue: 1.1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseAnim, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+        pulseLoopRef.current.start();
       });
-    }, 3000);
 
-    return () => clearTimeout(timer);
-  }, []);
+      // 4. Slide up text
+      Animated.parallel([
+        Animated.timing(textSlide, {
+          toValue: 0,
+          duration: 600,
+          delay: 400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textOpacity, {
+          toValue: 1,
+          duration: 600,
+          delay: 400,
+          useNativeDriver: true,
+        }),
+      ]).start();
 
-  const MedalIcon = medalIcons[medalId] || MedalFirstTask;
+      // 5. Auto-dismiss after 3 seconds
+      const timer = setTimeout(() => {
+        handleClose();
+      }, 3000);
+
+      return () => {
+        clearTimeout(timer);
+        if (pulseLoopRef.current) {
+          pulseLoopRef.current.stop();
+        }
+      };
+    }
+  }, [visible, medal]);
+
+  const handleClose = () => {
+    console.log('🎖️ Closing medal animation for:', medal.title);
+
+    // Stop pulse animation
+    if (pulseLoopRef.current) {
+      pulseLoopRef.current.stop();
+    }
+
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onClose();
+    });
+  };
+
+  if (!visible) return null;
+
+  const MedalIcon = medalIcons[medal.id] || MedalFirstTask;
 
   return (
-    <Animated.View style={[styles.overlay, { opacity }]}>
-      <View style={styles.content}>
-        {/* Medal with pulse */}
-        <Animated.View
-          style={[
-            styles.medalContainer,
-            {
-              transform: [{ scale: Animated.multiply(scale, pulseAnim) }],
-            },
-          ]}
-        >
-          <MedalIcon width={280} height={280} />
-        </Animated.View>
+    <Modal
+      transparent
+      visible={visible}
+      animationType="none"
+      onRequestClose={handleClose}
+    >
+      <Animated.View style={[styles.overlay, { opacity }]}>
+        <View style={styles.content}>
+          {/* Medal with pulse */}
+          <Animated.View
+            style={[
+              styles.medalContainer,
+              {
+                transform: [{ scale: Animated.multiply(scale, pulseAnim) }],
+              },
+            ]}
+          >
+            <MedalIcon width={280} height={280} />
+          </Animated.View>
 
-        {/* Text */}
-        <Animated.View
-          style={[
-            styles.textContainer,
-            {
-              transform: [{ translateY: textSlide }],
-              opacity: textOpacity,
-            },
-          ]}
-        >
-          <Text style={styles.unlockText}>🎉 MEDAL UNLOCKED! 🎉</Text>
-          <Text style={styles.medalTitle}>{medalTitle}</Text>
-        </Animated.View>
-      </View>
-    </Animated.View>
+          {/* Text */}
+          <Animated.View
+            style={[
+              styles.textContainer,
+              {
+                transform: [{ translateY: textSlide }],
+                opacity: textOpacity,
+              },
+            ]}
+          >
+            <Text style={styles.unlockText}>🎉 MEDAL UNLOCKED! 🎉</Text>
+            <Text style={styles.medalTitle}>{medal.title}</Text>
+            <Text style={styles.medalDescription}>{medal.description}</Text>
+          </Animated.View>
+        </View>
+      </Animated.View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 9999,
   },
   content: {
     alignItems: 'center',
@@ -192,5 +227,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     lineHeight: 32,
+    marginBottom: 8,
+  },
+  medalDescription: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#CCCCCC',
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });

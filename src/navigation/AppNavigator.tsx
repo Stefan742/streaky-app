@@ -5,7 +5,9 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import * as Haptics from 'expo-haptics';
 import { useMedalStore } from '../store/MedalStore';
+
 
 // Screens
 import AchievementsScreen from '../screens/AchievementsScreen';
@@ -92,9 +94,31 @@ export default function AppNavigator() {
           tabBarInactiveTintColor: '#9CA3AF',
         })}
       >
-        <Tab.Screen name="Home" component={HomeScreen} />
-        <Tab.Screen name="Medals" component={AchievementsScreen} />
-        <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
+        <Tab.Screen
+  name="Home"
+  component={HomeScreen}
+  listeners={{
+    tabPress: async () => {
+      await Haptics.impactAsync(
+        Haptics.ImpactFeedbackStyle.Medium
+      );
+    },
+  }}
+/>
+        <Tab.Screen name="Medals" component={AchievementsScreen}  listeners={{
+    tabPress: async () => {
+      await Haptics.impactAsync(
+        Haptics.ImpactFeedbackStyle.Medium
+      );
+    },
+  }}/>
+        <Tab.Screen name="Leaderboard" component={LeaderboardScreen} listeners={{
+    tabPress: async () => {
+      await Haptics.impactAsync(
+        Haptics.ImpactFeedbackStyle.Medium
+      );
+    },
+  }} />
       </Tab.Navigator>
     </GestureHandlerRootView>
   );

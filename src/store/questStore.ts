@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { useUserStore } from '../store/userStore';
 
 export type Quest = {
   id: string;
@@ -12,14 +14,14 @@ export type Quest = {
 
 type QuestState = {
   quests: Quest[];
-  totalCompletedQuests: number; // NEW: Track total completed quests
-  todayCompletedCount: number; // NEW: Track quests completed today
-  lastResetDate: string; // NEW: Track when daily count was reset
+  totalCompletedQuests: number;
+  todayCompletedCount: number;
+  lastResetDate: string;
   
   addQuest: (title: string, category: 'HEALTH' | 'STUDY' | 'WORK') => void;
   toggleQuest: (id: string) => void;
   deleteQuest: (id: string) => void;
-  resetDailyCount: () => void; // NEW: Reset daily count
+  resetDailyCount: () => void;
 };
 
 // Helper to get today's date string
@@ -40,17 +42,26 @@ export const useQuestStore = create<QuestState>()(
       lastResetDate: getTodayString(),
 
       addQuest: (title, category) =>
-        set((state) => ({
-          quests: [
-            ...state.quests,
-            {
-              id: Date.now().toString(),
-              title,
-              category,
-              completed: false,
-            },
-          ],
-        })),
+        set((state) => {
+          const newState = {
+            quests: [
+              ...state.quests,
+              {
+                id: Date.now().toString(),
+                title,
+                category,
+                completed: false,
+              },
+            ],
+          };
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          // 🔄 SYNC TO FIREBASE
+          import('../services/questSyncService').then(({ syncQuestsToFirebase }) => {
+            syncQuestsToFirebase();
+          });
+
+          return newState;
+        }),
 
       toggleQuest: (id) =>
         set((state) => {
@@ -70,8 +81,42 @@ export const useQuestStore = create<QuestState>()(
 
           // If completing a quest (not uncompleting)
           if (!quest.completed) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             newTotalCompleted += 1;
             newTodayCount += 1;
+
+            // 🔥 STREAK UPDATE (само при завршување на quest!)
+            useUserStore.getState().updateStreak();
+
+            // 🏅 MEDAL CHECKS
+            import('../services/medalService').then(({ 
+              checkFirstTaskMedal, 
+              check100TasksMedal, 
+              checkSuperHappyMedal 
+            }) => {
+              // First task medal
+              if (newTotalCompleted === 1) {
+                checkFirstTaskMedal();
+              }
+
+              // 100 tasks medal
+              if (newTotalCompleted === 100) {
+                check100TasksMedal(newTotalCompleted);
+              }
+
+              // Super Happy medal (10 in one day)
+              if (newTodayCount === 10) {
+                checkSuperHappyMedal(newTodayCount);
+              }
+            });
+
+            // 🎁 XP REWARD
+            useUserStore.getState().addXP(50); // +50 XP per quest
+
+            // 🔄 SYNC TO FIREBASE
+            import('../services/questSyncService').then(({ syncQuestsToFirebase }) => {
+              syncQuestsToFirebase();
+            });
           }
 
           return {
@@ -90,10 +135,24 @@ export const useQuestStore = create<QuestState>()(
           };
         }),
 
+      /**
+       * 🔥 ИСПРАВЕНО: deleteQuest со Firebase sync
+       */
       deleteQuest: (id) =>
-        set((state) => ({
-          quests: state.quests.filter((q) => q.id !== id),
-        })),
+        set((state) => {
+          const newState = {
+            quests: state.quests.filter((q) => q.id !== id),
+          };
+
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+          // 🔄 SYNC TO FIREBASE (КРИТИЧНО!)
+          import('../services/questSyncService').then(({ syncQuestsToFirebase }) => {
+            syncQuestsToFirebase();
+          });
+
+          return newState;
+        }),
 
       resetDailyCount: () =>
         set({

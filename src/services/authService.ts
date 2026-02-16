@@ -1,13 +1,11 @@
 // src/services/authService.ts
 import {
-    createUserWithEmailAndPassword,
-    User as FirebaseUser,
-    onAuthStateChanged,
-    sendEmailVerification,
-    sendPasswordResetEmail,
-    signInWithEmailAndPassword,
-    signOut,
-    updateProfile,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
@@ -43,6 +41,11 @@ export async function registerWithFirebase(
   password: string
 ): Promise<{ success: boolean; error?: string; user?: User }> {
   try {
+    console.log('🔐 Starting Firebase registration...');
+    console.log('📧 Email:', email);
+    console.log('🔥 Auth instance:', !!auth);
+    console.log('🔥 Auth app:', auth.app.name);
+    
     // Validate inputs
     if (!name || name.trim().length < 2) {
       return { success: false, error: 'Name must be at least 2 characters' };
@@ -56,17 +59,21 @@ export async function registerWithFirebase(
       return { success: false, error: 'Password must be at least 6 characters' };
     }
 
-    // Create Firebase Auth user
+    console.log('✅ Creating Firebase Auth user...');
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const firebaseUser = userCredential.user;
+    console.log('✅ Auth user created:', firebaseUser.uid);
 
     // Update display name
     await updateProfile(firebaseUser, { displayName: name });
+    console.log('✅ Display name updated');
 
-    // Send email verification (ВАЖНО за Play Store / App Store)
-    await sendEmailVerification(firebaseUser);
+    // Skip email verification for testing
+    // await sendEmailVerification(firebaseUser);
+    console.log('⏭️ Skipping email verification for testing');
 
     // Generate unique friend code
+    console.log('🔑 Generating friend code...');
     let friendCode = generateFriendCode();
     let attempts = 0;
     while (!(await isUniqueFriendCode(friendCode)) && attempts < 10) {
@@ -77,6 +84,7 @@ export async function registerWithFirebase(
     if (attempts >= 10) {
       throw new Error('Failed to generate unique friend code');
     }
+    console.log('✅ Friend code generated:', friendCode);
 
     // Create user document in Firestore
     const userData: User = {
@@ -91,20 +99,27 @@ export async function registerWithFirebase(
       friends: [],
     };
 
-    // Use batch write for atomicity
+    console.log('📝 Creating Firestore documents...');
+    
+    // Create user document
+    console.log('  → Creating users document...');
     await setDoc(doc(db, 'users', firebaseUser.uid), {
       ...userData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    console.log('  ✅ Users document created');
 
     // Create friend code lookup document
+    console.log('  → Creating friendCodes document...');
     await setDoc(doc(db, 'friendCodes', friendCode), {
       userId: firebaseUser.uid,
       createdAt: serverTimestamp(),
     });
+    console.log('  ✅ FriendCodes document created');
 
     // Initialize empty collections
+    console.log('  → Creating quests document...');
     await setDoc(doc(db, 'quests', firebaseUser.uid), {
       quests: [],
       totalCompletedQuests: 0,
@@ -112,22 +127,31 @@ export async function registerWithFirebase(
       lastResetDate: new Date().toISOString().split('T')[0],
       updatedAt: serverTimestamp(),
     });
+    console.log('  ✅ Quests document created');
 
+    console.log('  → Creating medals document...');
     await setDoc(doc(db, 'medals', firebaseUser.uid), {
       medals: [],
       unviewedCount: 0,
       updatedAt: serverTimestamp(),
     });
+    console.log('  ✅ Medals document created');
 
+    console.log('  → Creating activity document...');
     await setDoc(doc(db, 'activity', firebaseUser.uid), {
       activeDays: [],
       lastActiveDate: '',
       updatedAt: serverTimestamp(),
     });
+    console.log('  ✅ Activity document created');
 
+    console.log('🎉 Registration successful!');
     return { success: true, user: userData };
   } catch (error: any) {
-    console.error('Firebase registration error:', error);
+    console.error('❌ Firebase registration error:', error);
+    console.error('❌ Error code:', error.code);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
 
     let errorMessage = 'Registration failed';
     if (error.code === 'auth/email-already-in-use') {
@@ -138,6 +162,8 @@ export async function registerWithFirebase(
       errorMessage = 'Invalid email address';
     } else if (error.code === 'auth/network-request-failed') {
       errorMessage = 'Network error. Please check your connection.';
+    } else if (error.code === 'permission-denied' || error.message.includes('permission')) {
+      errorMessage = 'Permission denied. Please check Firestore rules.';
     }
 
     return { success: false, error: errorMessage };
@@ -222,7 +248,7 @@ export async function sendPasswordReset(email: string): Promise<{ success: boole
 
 /**
  * Set up auth state listener
- * ИСПРАВЕНО: Користи setState наместо директна мутација
+ * ИСПРАВЕНО: Креира Firestore документ ако не постои
  */
 export function setupAuthListener(
   onUserChanged: (user: User | null, isGuest: boolean) => void
@@ -234,14 +260,70 @@ export function setupAuthListener(
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
 
         if (userDoc.exists()) {
+          // User document exists
           const userData = userDoc.data() as User;
           onUserChanged({ ...userData, id: firebaseUser.uid }, false);
         } else {
-          console.error('User document not found for authenticated user');
-          onUserChanged(null, true);
+          // User document doesn't exist - create it (for old users)
+          console.warn('⚠️ User document not found, creating one...');
+          
+          // Generate friend code
+          let friendCode = generateFriendCode();
+          let attempts = 0;
+          while (!(await isUniqueFriendCode(friendCode)) && attempts < 10) {
+            friendCode = generateFriendCode();
+            attempts++;
+          }
+
+          const newUserData: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || 'User',
+            email: firebaseUser.email || '',
+            avatar: 'AvatarNormal',
+            xp: 0,
+            level: 1,
+            streak: 1,
+            friendCode,
+            friends: [],
+          };
+
+          // Create missing documents
+          await setDoc(doc(db, 'users', firebaseUser.uid), {
+            ...newUserData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+
+          await setDoc(doc(db, 'friendCodes', friendCode), {
+            userId: firebaseUser.uid,
+            createdAt: serverTimestamp(),
+          });
+
+          await setDoc(doc(db, 'quests', firebaseUser.uid), {
+            quests: [],
+            totalCompletedQuests: 0,
+            todayCompletedCount: 0,
+            lastResetDate: new Date().toISOString().split('T')[0],
+            updatedAt: serverTimestamp(),
+          });
+
+          await setDoc(doc(db, 'medals', firebaseUser.uid), {
+            medals: [],
+            unviewedCount: 0,
+            updatedAt: serverTimestamp(),
+          });
+
+          await setDoc(doc(db, 'activity', firebaseUser.uid), {
+            activeDays: [],
+            lastActiveDate: '',
+            updatedAt: serverTimestamp(),
+          });
+
+          console.log('✅ User documents created');
+          onUserChanged(newUserData, false);
         }
       } catch (error) {
-        console.error('Error fetching user data:', error);
+        console.error('❌ Error in auth state listener:', error);
         onUserChanged(null, true);
       }
     } else {
@@ -251,35 +333,4 @@ export function setupAuthListener(
   });
 
   return unsubscribe;
-}
-
-/**
- * Get current Firebase user
- */
-export function getCurrentFirebaseUser(): FirebaseUser | null {
-  return auth.currentUser;
-}
-
-/**
- * Check if email is verified
- */
-export function isEmailVerified(): boolean {
-  return auth.currentUser?.emailVerified ?? false;
-}
-
-/**
- * Resend verification email
- */
-export async function resendVerificationEmail(): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!auth.currentUser) {
-      return { success: false, error: 'No user logged in' };
-    }
-
-    await sendEmailVerification(auth.currentUser);
-    return { success: true };
-  } catch (error: any) {
-    console.error('Resend verification error:', error);
-    return { success: false, error: 'Failed to send verification email' };
-  }
 }

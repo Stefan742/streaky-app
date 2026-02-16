@@ -1,7 +1,7 @@
-// src/screens/LeaderboardScreen.tsx (Expo Router version)
+// src/screens/LeaderboardScreen_expo_router.tsx
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Clipboard,
@@ -14,7 +14,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MOCK_USERS, useAuthStore } from '../store/authStore';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
+import { useAuthStore } from '../store/authStore';
+import { User } from '../types';
 
 import AvatarCool from '../../assets/avatars/avatar_cool.svg';
 import AvatarHappy from '../../assets/avatars/avatar_happy.svg';
@@ -22,7 +25,7 @@ import AvatarNormal from '../../assets/avatars/avatar_normal.svg';
 import AvatarSad from '../../assets/avatars/avatar_sad.svg';
 import AvatarWaiting from '../../assets/avatars/avatar_waiting.svg';
 
-const AVATAR_COMPONENTS: any = {
+const AVATAR_COMPONENTS: Record<string, React.ComponentType<{ width: number; height: number; style?: any }>> = {
   AvatarCool,
   AvatarHappy,
   AvatarNormal,
@@ -30,12 +33,14 @@ const AVATAR_COMPONENTS: any = {
   AvatarWaiting,
 };
 
-function Podium({ topThree }: { topThree: any[] }) {
+// ─── Podium ──────────────────────────────────────────────────────────────────
+
+function Podium({ topThree }: { topThree: User[] }) {
   if (topThree.length === 0) return null;
 
-  const AvatarFirst = AVATAR_COMPONENTS[topThree[0]?.avatar] || AvatarNormal;
-  const AvatarSecond = topThree[1] ? AVATAR_COMPONENTS[topThree[1].avatar] : AvatarHappy;
-  const AvatarThird = topThree[2] ? AVATAR_COMPONENTS[topThree[2].avatar] : AvatarSad;
+  const AvatarFirst  = AVATAR_COMPONENTS[topThree[0]?.avatar] ?? AvatarNormal;
+  const AvatarSecond = topThree[1] ? (AVATAR_COMPONENTS[topThree[1].avatar] ?? AvatarHappy) : AvatarHappy;
+  const AvatarThird  = topThree[2] ? (AVATAR_COMPONENTS[topThree[2].avatar] ?? AvatarSad)  : AvatarSad;
 
   return (
     <View style={styles.podiumContainer}>
@@ -64,6 +69,8 @@ function Podium({ topThree }: { topThree: any[] }) {
   );
 }
 
+// ─── FriendCodeSection ────────────────────────────────────────────────────────
+
 function FriendCodeSection() {
   const { currentUser, addFriendByCode } = useAuthStore();
   const [friendCode, setFriendCode] = useState('');
@@ -84,22 +91,16 @@ function FriendCodeSection() {
     }
 
     setIsLoading(true);
-
     try {
       const result = await addFriendByCode(friendCode);
-
       if (result.success) {
-        Alert.alert(
-          'Success! 🎉',
-          `You are now friends with ${result.friendName}`,
-          [{ text: 'OK' }]
-        );
+        Alert.alert('Success! 🎉', `You are now friends with ${result.friendName}`, [{ text: 'OK' }]);
         setFriendCode('');
         setExpandedSection('none');
       } else {
-        Alert.alert('Error', result.error || 'Could not add friend');
+        Alert.alert('Error', result.error ?? 'Could not add friend');
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
@@ -151,12 +152,8 @@ function FriendCodeSection() {
             </TouchableOpacity>
           </View>
           <View style={styles.codeDisplay}>
-            <Text style={styles.codeText}>{currentUser?.friendCode || 'N/A'}</Text>
-            <TouchableOpacity
-              onPress={handleCopyCode}
-              style={styles.copyButton}
-              activeOpacity={0.7}
-            >
+            <Text style={styles.codeText}>{currentUser?.friendCode ?? 'N/A'}</Text>
+            <TouchableOpacity onPress={handleCopyCode} style={styles.copyButton} activeOpacity={0.7}>
               <Text style={styles.copyButtonText}>📋 Copy</Text>
             </TouchableOpacity>
           </View>
@@ -174,7 +171,7 @@ function FriendCodeSection() {
           <View style={styles.inputRow}>
             <TextInput
               style={styles.codeInput}
-              placeholder="Enter friend code"
+              placeholder="Enter friend code (e.g. STRK-AB12)"
               placeholderTextColor="#9ca3af"
               value={friendCode}
               onChangeText={setFriendCode}
@@ -204,22 +201,63 @@ function FriendCodeSection() {
   );
 }
 
+// ─── LeaderboardScreen ────────────────────────────────────────────────────────
+
 export default function LeaderboardScreen() {
   const { currentUser, isGuest } = useAuthStore();
 
-  const leaderboardData = useMemo(() => {
+  // Real friends fetched from Firestore
+  const [friendProfiles, setFriendProfiles] = useState<User[]>([]);
+  const [isFetchingFriends, setIsFetchingFriends] = useState(false);
+
+  // Fetch friend profiles from Firestore whenever the friends list changes
+  useEffect(() => {
+    if (!currentUser || isGuest) {
+      setFriendProfiles([]);
+      return;
+    }
+
+    const friendIds: string[] = currentUser.friends ?? [];
+
+    if (friendIds.length === 0) {
+      setFriendProfiles([]);
+      return;
+    }
+
+    setIsFetchingFriends(true);
+
+    const fetchFriends = async () => {
+      try {
+        const promises = friendIds.map((id) => getDoc(doc(db, 'users', id)));
+        const snapshots = await Promise.all(promises);
+
+        const profiles: User[] = snapshots
+          .filter((snap) => snap.exists())
+          .map((snap) => ({ ...(snap.data() as User), id: snap.id }));
+
+        setFriendProfiles(profiles);
+      } catch (error) {
+        console.error('❌ Failed to fetch friend profiles:', error);
+      } finally {
+        setIsFetchingFriends(false);
+      }
+    };
+
+    fetchFriends();
+  }, [currentUser?.friends, isGuest]);
+
+  // Build sorted leaderboard: current user + friends
+  const leaderboardData = useMemo<User[]>(() => {
     if (isGuest || !currentUser) return [];
 
-    const friendIds = currentUser.friends || [];
-    const userAndFriends = MOCK_USERS.filter(
-      (u) => u.id === currentUser.id || friendIds.includes(u.id)
-    );
+    const allEntries: User[] = [currentUser, ...friendProfiles];
 
-    return userAndFriends.sort((a, b) => b.xp - a.xp);
-  }, [currentUser, isGuest]);
+    return allEntries.sort((a: User, b: User) => b.xp - a.xp);
+  }, [currentUser, friendProfiles, isGuest]);
 
   const topThree = leaderboardData.slice(0, 3);
 
+  // ── Guest view ──────────────────────────────────────────────────────────────
   if (isGuest) {
     return (
       <SafeAreaView style={styles.container}>
@@ -229,14 +267,12 @@ export default function LeaderboardScreen() {
           end={{ x: 1, y: 1 }}
           style={styles.gradient}
         />
-
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyEmoji}>🏆</Text>
           <Text style={styles.emptyTitle}>Login to See Friends</Text>
           <Text style={styles.emptyText}>
             Track your progress and compete with friends on the leaderboard
           </Text>
-
           <TouchableOpacity
             onPress={() => router.push('/login')}
             activeOpacity={0.7}
@@ -251,7 +287,6 @@ export default function LeaderboardScreen() {
               <Text style={styles.loginButtonText}>Login</Text>
             </LinearGradient>
           </TouchableOpacity>
-
           <TouchableOpacity onPress={() => router.push('/register')}>
             <Text style={styles.registerLink}>Don't have an account? Sign up</Text>
           </TouchableOpacity>
@@ -260,13 +295,12 @@ export default function LeaderboardScreen() {
     );
   }
 
+  // ── No friends yet ──────────────────────────────────────────────────────────
   if (leaderboardData.length === 1) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.headerTitle}>HALL OF FAME</Text>
-
         <FriendCodeSection />
-
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyEmoji}>👥</Text>
           <Text style={styles.emptyTitle}>No Friends Yet</Text>
@@ -278,6 +312,7 @@ export default function LeaderboardScreen() {
     );
   }
 
+  // ── Full leaderboard ────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.headerTitle}>HALL OF FAME</Text>
@@ -286,12 +321,12 @@ export default function LeaderboardScreen() {
 
       <Podium topThree={topThree} />
 
-      <FlatList
+      <FlatList<User>
         data={leaderboardData}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingBottom: 40 }}
         renderItem={({ item, index }) => {
-          const AvatarComponent = AVATAR_COMPONENTS[item.avatar] || AvatarNormal;
+          const AvatarComponent = AVATAR_COMPONENTS[item.avatar] ?? AvatarNormal;
           const isCurrentUser = item.id === currentUser?.id;
 
           return (
@@ -310,6 +345,8 @@ export default function LeaderboardScreen() {
     </SafeAreaView>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -536,29 +573,28 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginTop: 20,
   },
-  // Add to the existing styles object:
-buttonRow: {
-  flexDirection: 'row',
-  gap: 8,
-},
-actionButton: {
-  flex: 1,
-  borderRadius: 12,
-  overflow: 'hidden',
-},
-actionButtonGradient: {
-  paddingVertical: 14,
-  alignItems: 'center',
-},
-actionButtonText: {
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: '700',
-},
-closeButton: {
-  fontSize: 20,
-  color: '#6b7280',
-  fontWeight: '600',
-  paddingHorizontal: 8,
-},
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionButton: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  actionButtonGradient: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  closeButton: {
+    fontSize: 20,
+    color: '#6b7280',
+    fontWeight: '600',
+    paddingHorizontal: 8,
+  },
 });

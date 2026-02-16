@@ -1,7 +1,6 @@
-// src/store/medalStore.ts
+// src/store/MedalStore.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 
 export type Medal = {
   id: string;
@@ -14,11 +13,13 @@ export type Medal = {
 
 type MedalState = {
   medals: Medal[];
-  unviewedCount: number; // број на нови медали што не се видени
+  unviewedCount: number;
   unlockMedal: (id: string) => void;
   markMedalAsViewed: (id: string) => void;
   markAllAsViewed: () => void;
   getUnviewedMedals: () => Medal[];
+  initializeMedals: () => Promise<void>;
+  setMedals: (medals: Medal[]) => void;
 };
 
 const initialMedals: Medal[] = [
@@ -27,7 +28,6 @@ const initialMedals: Medal[] = [
     title: 'First Task Completed',
     description: 'Complete your first quest',
     unlocked: false,
-    unlockedAt: Date.now(),
     viewedInVault: false,
   },
   {
@@ -88,62 +88,150 @@ const initialMedals: Medal[] = [
   },
 ];
 
-export const useMedalStore = create<MedalState>()(
-  persist(
-    (set, get) => ({
-      medals: initialMedals,
-      unviewedCount: 0,
+// 🔥 Зачувај viewedInVault статус во AsyncStorage
+async function saveViewedStatus(medals: Medal[]): Promise<void> {
+  try {
+    const viewedMap: Record<string, boolean> = {};
+    medals.forEach((medal) => {
+      if (medal.unlocked) {
+        viewedMap[medal.id] = medal.viewedInVault;
+      }
+    });
+    await AsyncStorage.setItem('medalViewedStatus', JSON.stringify(viewedMap));
+    console.log('✅ Viewed status saved:', viewedMap);
+  } catch (error) {
+    console.error('❌ Error saving viewed status:', error);
+  }
+}
 
-      unlockMedal: (id: string) =>
-        set((state) => {
-          const medal = state.medals.find((m) => m.id === id);
-          if (!medal || medal.unlocked) return state;
+// 🔥 Вчитај viewedInVault статус од AsyncStorage
+async function loadViewedStatus(): Promise<Record<string, boolean>> {
+  try {
+    const data = await AsyncStorage.getItem('medalViewedStatus');
+    const viewedMap = data ? JSON.parse(data) : {};
+    console.log('✅ Viewed status loaded:', viewedMap);
+    return viewedMap;
+  } catch (error) {
+    console.error('❌ Error loading viewed status:', error);
+    return {};
+  }
+}
 
-          const updatedMedals = state.medals.map((m) =>
-            m.id === id
-              ? { ...m, unlocked: true, unlockedAt: Date.now(), viewedInVault: false }
-              : m
-          );
+export const useMedalStore = create<MedalState>((set, get) => ({
+  medals: initialMedals,
+  unviewedCount: 0,
 
-          return {
-            medals: updatedMedals,
-            unviewedCount: state.unviewedCount + 1,
-          };
-        }),
+  unlockMedal: (id: string) => {
+    const medals = get().medals;
+    const medal = medals.find((m) => m.id === id);
 
-      markMedalAsViewed: (id: string) =>
-        set((state) => {
-          const medal = state.medals.find((m) => m.id === id);
-          if (!medal || medal.viewedInVault) return state;
-
-          const updatedMedals = state.medals.map((m) =>
-            m.id === id ? { ...m, viewedInVault: true } : m
-          );
-
-          return {
-            medals: updatedMedals,
-            unviewedCount: Math.max(0, state.unviewedCount - 1),
-          };
-        }),
-
-      markAllAsViewed: () =>
-        set((state) => ({
-          medals: state.medals.map((m) =>
-            m.unlocked && !m.viewedInVault ? { ...m, viewedInVault: true } : m
-          ),
-          unviewedCount: 0,
-        })),
-
-      getUnviewedMedals: () => {
-        const { medals } = get();
-        return medals.filter((m) => m.unlocked && !m.viewedInVault);
-      },
-    
-      
-    }),
-    {
-      name: 'medal-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+    if (!medal || medal.unlocked) {
+      console.log(`⚠️ Medal ${id} already unlocked or not found`);
+      return;
     }
-  )
-);
+
+    const updatedMedals = medals.map((m) =>
+      m.id === id
+        ? {
+            ...m,
+            unlocked: true,
+            unlockedAt: Date.now(),
+            viewedInVault: false, // 🔥 Нов medal = unseen
+          }
+        : m
+    );
+
+    const unviewedCount = updatedMedals.filter(
+      (m) => m.unlocked && !m.viewedInVault
+    ).length;
+
+    set({ medals: updatedMedals, unviewedCount });
+
+    console.log(`🏅 Medal ${id} unlocked! Unviewed count: ${unviewedCount}`);
+
+    // 🔥 Зачувај viewedInVault
+    saveViewedStatus(updatedMedals);
+  },
+
+  markMedalAsViewed: (id: string) => {
+    const medals = get().medals;
+    const medal = medals.find((m) => m.id === id);
+
+    if (!medal || medal.viewedInVault) {
+      console.log(`⚠️ Medal ${id} already viewed or not found`);
+      return;
+    }
+
+    const updatedMedals = medals.map((m) =>
+      m.id === id ? { ...m, viewedInVault: true } : m
+    );
+
+    const unviewedCount = updatedMedals.filter(
+      (m) => m.unlocked && !m.viewedInVault
+    ).length;
+
+    set({ medals: updatedMedals, unviewedCount });
+
+    console.log(`✅ Medal ${id} marked as viewed! Remaining: ${unviewedCount}`);
+
+    // 🔥 Зачувај viewedInVault
+    saveViewedStatus(updatedMedals);
+  },
+
+  markAllAsViewed: () => {
+    const medals = get().medals;
+    const updatedMedals = medals.map((m) =>
+      m.unlocked ? { ...m, viewedInVault: true } : m
+    );
+
+    set({ medals: updatedMedals, unviewedCount: 0 });
+
+    console.log('✅ All medals marked as viewed');
+
+    // 🔥 Зачувај viewedInVault
+    saveViewedStatus(updatedMedals);
+  },
+
+  getUnviewedMedals: () => {
+    const { medals } = get();
+    const unviewed = medals.filter((m) => m.unlocked && !m.viewedInVault);
+    console.log(`📋 Unviewed medals: ${unviewed.length}`, unviewed.map(m => m.id));
+    return unviewed;
+  },
+
+  setMedals: (medals: Medal[]) => {
+    const unviewedCount = medals.filter(
+      (m) => m.unlocked && !m.viewedInVault
+    ).length;
+    set({ medals, unviewedCount });
+    console.log(`📝 Medals updated: ${medals.length} total, ${unviewedCount} unviewed`);
+  },
+
+  initializeMedals: async () => {
+    try {
+      console.log('🔄 Initializing medals...');
+      
+      // 🔥 Вчитај viewedInVault од AsyncStorage
+      const viewedMap = await loadViewedStatus();
+
+      const medals = initialMedals.map((medal) => ({
+        ...medal,
+        viewedInVault: viewedMap[medal.id] || false,
+      }));
+
+      const unviewedCount = medals.filter(
+        (m) => m.unlocked && !m.viewedInVault
+      ).length;
+
+      set({ medals, unviewedCount });
+      
+      console.log('✅ Medals initialized:', {
+        total: medals.length,
+        unlocked: medals.filter(m => m.unlocked).length,
+        unviewed: unviewedCount,
+      });
+    } catch (error) {
+      console.error('❌ Error initializing medals:', error);
+    }
+  },
+}));

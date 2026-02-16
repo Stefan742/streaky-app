@@ -20,7 +20,7 @@ export async function syncUserProgressToFirebase(): Promise<void> {
     async () => {
       const { currentUser, isGuest } = useAuthStore.getState();
       if (isGuest || !currentUser) {
-        console.log('User not logged in, skipping sync');
+        console.log('⚠️ User not logged in, skipping sync');
         return;
       }
 
@@ -36,7 +36,7 @@ export async function syncUserProgressToFirebase(): Promise<void> {
           updatedAt: serverTimestamp(),
         });
 
-        console.log('✅ User progress synced to Firebase');
+        console.log('✅ User progress synced to Firebase:', { xp, level, streak });
       } catch (error: any) {
         if (error.code === 'unavailable') {
           console.log('⚠️ Offline - sync will retry when online');
@@ -45,18 +45,19 @@ export async function syncUserProgressToFirebase(): Promise<void> {
         }
       }
     },
-    'user-progress-sync', // debounce key
-    1500 // 1.5s debounce
+    'user-progress-sync',
+    1500
   );
 }
 
 /**
- * Sync user progress FROM Firestore
- * Conflict resolution: Use server timestamp to determine newer data
+ * 🔥 ИСПРАВЕНО: Sync user progress FROM Firestore
+ * FIREBASE WINS - секогаш земај ги Firebase податоците
  */
 export async function syncUserProgressFromFirebase(): Promise<void> {
   const { currentUser, isGuest } = useAuthStore.getState();
   if (isGuest || !currentUser) {
+    console.log('⚠️ User not logged in, skipping sync');
     return;
   }
 
@@ -65,30 +66,24 @@ export async function syncUserProgressFromFirebase(): Promise<void> {
     const userDoc = await getDoc(userRef);
 
     if (!userDoc.exists()) {
-      console.log('User document does not exist');
+      console.log('⚠️ User document does not exist on Firebase');
       return;
     }
 
     const firebaseData = userDoc.data() as UserProgressData;
-    const localData = useUserStore.getState();
 
-    // Conflict resolution: Take higher XP (user cannot lose progress)
-    // This is safe because XP only increases
-    if (firebaseData.xp > localData.xp) {
-      useUserStore.setState({
-        xp: firebaseData.xp,
-        level: firebaseData.level,
-        streak: firebaseData.streak,
-      });
+    // 🔥 FIREBASE WINS: Земи ги Firebase податоците директно
+    useUserStore.setState({
+      xp: firebaseData.xp || 0,
+      level: firebaseData.level || 1,
+      streak: firebaseData.streak || 1,
+    });
 
-      console.log('✅ Local progress updated from Firebase (server had higher XP)');
-    } else if (localData.xp > firebaseData.xp) {
-      // Local is ahead - push to Firebase
-      console.log('⚠️ Local progress ahead of server - pushing to Firebase');
-      await syncUserProgressToFirebase();
-    } else {
-      console.log('✅ Local and server progress are in sync');
-    }
+    console.log('✅ User progress loaded from Firebase:', {
+      xp: firebaseData.xp,
+      level: firebaseData.level,
+      streak: firebaseData.streak,
+    });
   } catch (error: any) {
     if (error.code === 'unavailable') {
       console.log('⚠️ Offline - will sync when online');

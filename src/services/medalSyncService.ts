@@ -2,9 +2,27 @@
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { useAuthStore } from '../store/authStore';
-import { useMedalStore } from '../store/MedalStore';
-import { Medal, MedalData } from '../types';
+import { Medal, useMedalStore } from '../store/MedalStore';
+import { MedalData } from '../types';
 import { syncQueue } from './syncQueue';
+
+/**
+ * 🔥 Clean medal data - отстрани undefined вредности
+ */
+function cleanMedalData(medal: Medal): any {
+  const cleaned: any = {
+    id: medal.id,
+    title: medal.title,
+    description: medal.description,
+    unlocked: medal.unlocked || false,
+  };
+
+  if (medal.unlockedAt !== undefined && medal.unlockedAt !== null) {
+    cleaned.unlockedAt = medal.unlockedAt;
+  }
+
+  return cleaned;
+}
 
 /**
  * Sync medals TO Firestore (with queue)
@@ -14,6 +32,7 @@ export async function syncMedalsToFirebase(): Promise<void> {
     async () => {
       const { currentUser, isGuest } = useAuthStore.getState();
       if (isGuest || !currentUser) {
+        console.log('⚠️ User not logged in, skipping medal sync');
         return;
       }
 
@@ -22,15 +41,20 @@ export async function syncMedalsToFirebase(): Promise<void> {
       try {
         const medalRef = doc(db, 'medals', currentUser.id);
 
+        const cleanedMedals = medalState.medals.map(cleanMedalData);
+
         const data: MedalData = {
-          medals: medalState.medals,
+          medals: cleanedMedals,
           unviewedCount: medalState.unviewedCount,
           updatedAt: serverTimestamp() as any,
         };
 
         await setDoc(medalRef, data, { merge: true });
 
-        console.log('✅ Medals synced to Firebase');
+        console.log('✅ Medals synced to Firebase:', {
+          count: cleanedMedals.length,
+          unlocked: cleanedMedals.filter((m: any) => m.unlocked).length,
+        });
       } catch (error: any) {
         if (error.code === 'unavailable') {
           console.log('⚠️ Offline - medal sync will retry');
@@ -45,12 +69,14 @@ export async function syncMedalsToFirebase(): Promise<void> {
 }
 
 /**
- * Sync medals FROM Firestore
- * Conflict resolution: Merge unlocked medals (once unlocked, always unlocked)
+ * 🔥 Sync medals FROM Firestore
+ * FIREBASE WINS за unlocked/unlockedAt
+ * viewedInVault останува ЛОКАЛНО
  */
 export async function syncMedalsFromFirebase(): Promise<void> {
   const { currentUser, isGuest } = useAuthStore.getState();
   if (isGuest || !currentUser) {
+    console.log('⚠️ User not logged in, skipping medal sync');
     return;
   }
 
@@ -59,7 +85,7 @@ export async function syncMedalsFromFirebase(): Promise<void> {
     const medalDoc = await getDoc(medalRef);
 
     if (!medalDoc.exists()) {
-      console.log('No medal data on server - pushing local data');
+      console.log('⚠️ No medal data on server - will upload local data');
       await syncMedalsToFirebase();
       return;
     }
@@ -67,43 +93,35 @@ export async function syncMedalsFromFirebase(): Promise<void> {
     const firebaseData = medalDoc.data() as MedalData;
     const localMedals = useMedalStore.getState().medals;
 
-    // Merge medals: If unlocked anywhere, it's unlocked everywhere
-    // Take earliest unlock timestamp
-    const mergedMedals: Medal[] = localMedals.map((localMedal) => {
+    // 🔥 Merge Firebase data со локалниот viewedInVault
+    const syncedMedals: Medal[] = localMedals.map((localMedal) => {
       const firebaseMedal = firebaseData.medals.find((m) => m.id === localMedal.id);
 
       if (!firebaseMedal) {
         return localMedal;
       }
 
-      const isUnlocked = localMedal.unlocked || firebaseMedal.unlocked;
-      const earliestUnlockTime = Math.min(
-        localMedal.unlockedAt || Infinity,
-        firebaseMedal.unlockedAt || Infinity
-      );
-
       return {
         ...localMedal,
-        unlocked: isUnlocked,
-        unlockedAt: isUnlocked && earliestUnlockTime !== Infinity
-          ? earliestUnlockTime
-          : undefined,
-        // viewedInVault is local-only, don't sync
-        viewedInVault: localMedal.viewedInVault,
+        unlocked: firebaseMedal.unlocked || false,
+        unlockedAt: firebaseMedal.unlockedAt || undefined,
+        viewedInVault: localMedal.viewedInVault, // 🔥 Зачувај локално
       };
     });
 
-    const unviewedCount = mergedMedals.filter((m) => m.unlocked && !m.viewedInVault).length;
+    const unviewedCount = syncedMedals.filter(
+      (m) => m.unlocked && !m.viewedInVault
+    ).length;
 
     useMedalStore.setState({
-      medals: mergedMedals,
+      medals: syncedMedals,
       unviewedCount,
     });
 
-    console.log('✅ Medals synced from Firebase (merged)');
-
-    // Push merged state back to Firebase
-    await syncMedalsToFirebase();
+    console.log('✅ Medals loaded from Firebase:', {
+      unlocked: syncedMedals.filter((m) => m.unlocked).length,
+      unviewed: unviewedCount,
+    });
   } catch (error: any) {
     if (error.code === 'unavailable') {
       console.log('⚠️ Offline - will sync medals when online');
